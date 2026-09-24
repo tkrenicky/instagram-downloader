@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "Instagram Public Downloader",
+  "version": "1.0.0",
+  "description": "Downloads public Instagram feed images and highlight images using your existing Instagram login.",
+  "permissions": ["downloads", "tabs"],
+  "host_permissions": ["https://www.instagram.com/*", "https://*.cdninstagram.com/*", "https://*.fbcdn.net/*"],
+  "action": {
+    "default_title": "IG Downloader",
+    "default_popup": "extension/popup.html"
+  },
+  "content_scripts": [{
+    "matches": ["https://www.instagram.com/*"],
+    "js": ["extension/content.js"],
+    "run_at": "document_idle"
+  }]
+}
