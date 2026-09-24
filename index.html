@@ -39,48 +39,71 @@ small{color:#888}.tokenrow{display:grid;grid-template-columns:1fr auto;gap:8px}.
 <div id="m"></div>
 </div></div>
 <script>
-const $=id=>document.getElementById(id), m=$('m'), fill=$('fill'), go=$('go');
+const $=id=>document.getElementById(id),m=$('m'),fill=$('fill'),go=$('go');
 $('token').value=localStorage.getItem('apify_token')||'';
 $('save').onclick=()=>{localStorage.setItem('apify_token',$('token').value.trim());m.textContent='Token uložen v tomto prohlížeči.'};
 const safe=s=>String(s||'item').replace(/[^A-Za-z0-9._-]+/g,'_').slice(0,100);
-async function api(body){
- const r=await fetch('/api/scrape',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+async function post(path,body){
+ const r=await fetch(path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
  const j=await r.json().catch(()=>({error:'Neplatná odpověď serveru'}));
- if(!r.ok) throw new Error(j.error||('HTTP '+r.status));
- return j;
+ if(!r.ok) throw new Error(j.error||('HTTP '+r.status)); return j;
+}
+function statusLine(states){
+ return Object.entries(states).map(([k,v])=>(k==='feed'?'Feed':'Highlights')+': '+v.status+(v.statusMessage?' — '+v.statusMessage:'')).join('\n');
+}
+async function waitJobs(token,jobs){
+ const states={};for(const [k,j] of Object.entries(jobs))states[k]={status:j.status||'READY',runId:j.id,datasetId:j.defaultDatasetId||null};
+ for(let round=0;round<180;round++){
+   let done=true;
+   for(const [k,s] of Object.entries(states)){
+     if(['SUCCEEDED','FAILED','ABORTED','TIMED-OUT'].includes(s.status))continue;
+     done=false;
+     const st=await post('/api/status',{token,runId:s.runId});
+     states[k]={...s,...st,datasetId:st.defaultDatasetId||s.datasetId};
+   }
+   m.textContent=statusLine(states)+'\n\nČekám na dokončení scraperu…';
+   if(done||Object.values(states).every(s=>['SUCCEEDED','FAILED','ABORTED','TIMED-OUT'].includes(s.status)))return states;
+   await sleep(3000);
+ }
+ throw new Error('Scraper se nedokončil do 9 minut.');
 }
 go.onclick=async()=>{
- const username=$('u').value.trim().replace(/^@/,'');
- const token=$('token').value.trim();
- if(!username) return m.textContent='Zadej username.';
- if(!token) return m.textContent='Vlož Apify API token.';
- localStorage.setItem('apify_token',token);
- go.disabled=true;fill.style.width='0%';
+ const username=$('u').value.trim().replace(/^@/,'');const token=$('token').value.trim();
+ if(!username)return m.textContent='Zadej username.';if(!token)return m.textContent='Vlož Apify API token.';
+ localStorage.setItem('apify_token',token);go.disabled=true;fill.style.width='0%';
  try{
-   m.textContent='Spouštím scraper…';
-   const data=await api({username,token,feed:$('feed').checked,highlights:$('hl').checked,limit:Number($('limit').value||1000)});
-   const items=data.items||[];
-   if(!items.length) throw new Error('Scraper nevrátil žádné obrázky.');
-   m.textContent='Nalezeno '+items.length+' obrázků. Stahuji…';
-   const zip=new JSZip();
-   let ok=0,fail=0;
-   for(let i=0;i<items.length;i++){
-      const it=items[i];
-      try{
-        const r=await fetch('/api/proxy?url='+encodeURIComponent(it.url));
-        if(!r.ok) throw new Error('HTTP '+r.status);
-        zip.file(it.path||('image_'+(i+1)+'.jpg'),await r.blob());
-        ok++;
-      }catch(e){fail++}
-      fill.style.width=Math.round((i+1)/items.length*100)+'%';
-      m.textContent='Stahuji '+(i+1)+'/'+items.length+' | OK '+ok+' | chyby '+fail;
+   m.textContent='Zakládám scraper joby…';
+   const started=await post('/api/start',{username,token,feed:$('feed').checked,highlights:$('hl').checked,limit:Number($('limit').value||1000)});
+   const jobs=started.jobs||{};if(!Object.keys(jobs).length)throw new Error('Nebyl spuštěn žádný scraper.');
+   m.textContent='Scraper spuštěn. Kontroluji stav…';
+   const states=await waitJobs(token,jobs);
+   const failed=Object.entries(states).filter(([k,s])=>s.status!=='SUCCEEDED');
+   if(failed.length===Object.keys(states).length)throw new Error('Všechny scraper joby selhaly: '+failed.map(([k,s])=>k+' '+s.status).join(', '));
+   let items=[];
+   for(const [k,s] of Object.entries(states)){
+     if(s.status!=='SUCCEEDED'||!s.datasetId)continue;
+     m.textContent=statusLine(states)+'\n\nNačítám výsledky '+k+'…';
+     const r=await post('/api/results',{token,datasetId:s.datasetId,kind:k});
+     items.push(...(r.items||[]));
    }
-   if(!ok) throw new Error('Nepodařilo se stáhnout žádný obrázek.');
+   const seen=new Set();items=items.filter(x=>x.url&&!seen.has(x.url)&&seen.add(x.url));
+   if(!items.length)throw new Error('Scraper doběhl, ale nevrátil žádné obrázky.');
+   const zip=new JSZip();let ok=0,err=0;
+   for(let i=0;i<items.length;i++){
+     try{
+       const r=await fetch('/api/proxy?url='+encodeURIComponent(items[i].url));
+       if(!r.ok)throw new Error('HTTP '+r.status);
+       zip.file(items[i].path||('image_'+(i+1)+'.jpg'),await r.blob());ok++;
+     }catch(e){err++}
+     fill.style.width=Math.round((i+1)/items.length*100)+'%';
+     m.textContent='Stahuji obrázky '+(i+1)+'/'+items.length+' | OK '+ok+' | chyby '+err;
+   }
+   if(!ok)throw new Error('Scraper našel média, ale žádný obrázek se nepodařilo stáhnout.');
    m.textContent='Vytvářím ZIP…';
    const blob=await zip.generateAsync({type:'blob',compression:'DEFLATE',compressionOptions:{level:4}});
-   const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=safe(username)+'_instagram.zip';document.body.appendChild(a);a.click();a.remove();
-   setTimeout(()=>URL.revokeObjectURL(a.href),10000);
-   m.textContent='Hotovo. V ZIPu '+ok+' obrázků'+(fail?' ('+fail+' se nepodařilo stáhnout).':'') ;
+   const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=safe(username)+'_instagram.zip';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),10000);
+   m.textContent='Hotovo. V ZIPu '+ok+' obrázků'+(err?' | chyby '+err:'')+'.';
  }catch(e){m.textContent='Chyba: '+e.message}
  finally{go.disabled=false}
 };
