@@ -1,6 +1,7 @@
 import io, json, re, urllib.parse, urllib.request
 from http.server import BaseHTTPRequestHandler
 import instaloader
+import requests
 
 def clean(s):
     s = re.sub(r'[^A-Za-z0-9._-]+', '_', str(s or '')).strip('_')
@@ -36,7 +37,37 @@ class handler(BaseHTTPRequestHandler):
                 L.context._session.cookies.set('sessionid', sessionid, domain='.instagram.com')
                 L.context.username='session_user'
 
-            profile=instaloader.Profile.from_username(L.context, username)
+            # Instagram has become unreliable for Instaloader's default profile lookup.
+            # Try the normal path first, then the current web endpoint with browser-like headers.
+            try:
+                profile=instaloader.Profile.from_username(L.context, username)
+            except Exception:
+                url=f"https://www.instagram.com/api/v1/users/web_profile_info/?username={urllib.parse.quote(username)}"
+                headers={
+                    "X-IG-App-ID":"936619743392459",
+                    "X-ASBD-ID":"198387",
+                    "User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
+                    "Accept":"*/*",
+                    "Referer":f"https://www.instagram.com/{username}/",
+                }
+                if sessionid:
+                    headers["Cookie"]=f"sessionid={sessionid}"
+                resp=requests.get(url,headers=headers,timeout=20)
+                if resp.status_code in (401,403,429):
+                    hint=" Vlož sessionid svého Instagram účtu a spusť znovu." if not sessionid else " Instagram blokuje tento serverový požadavek i s vloženou session."
+                    return self._json(resp.status_code if resp.status_code!=429 else 429,{
+                        'error':f'Instagram odmítl načtení profilu (HTTP {resp.status_code}).'+hint
+                    })
+                if resp.status_code==404:
+                    return self._json(404,{'error':'Instagram profil nebyl nalezen.'})
+                try:
+                    payload=resp.json()
+                except Exception:
+                    return self._json(502,{'error':'Instagram vrátil neplatnou odpověď. Zkus vložit sessionid svého Instagram účtu.'})
+                user=(payload.get("data") or {}).get("user")
+                if not user:
+                    return self._json(502,{'error':'Instagram nevrátil data profilu. Zkus vložit sessionid svého Instagram účtu.'})
+                profile=instaloader.Profile(L.context,user)
             if profile.is_private:
                 return self._json(403,{'error':'Profil je soukromý. Tato aplikace je určená pro veřejné profily.'})
 
