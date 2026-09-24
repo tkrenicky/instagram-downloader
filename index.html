@@ -3,59 +3,84 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Instagram Public Downloader</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <style>
 body{font-family:Inter,system-ui,sans-serif;background:#0b0b0f;color:#eee;margin:0}
-.wrap{max-width:760px;margin:7vh auto;padding:24px}.card{background:#15151c;border:1px solid #2a2a35;border-radius:18px;padding:24px;box-shadow:0 14px 50px #0005}
-h1{margin-top:0}.sub{color:#bbb;line-height:1.5}label{display:block;margin:18px 0 6px;color:#bbb}
-input,button{width:100%;box-sizing:border-box;border-radius:12px;border:1px solid #343442;padding:13px 14px;font-size:16px;background:#0f0f15;color:#fff}
-button{margin-top:20px;background:#fff;color:#111;font-weight:700;cursor:pointer}button:disabled{opacity:.55;cursor:default}
-small{color:#9292a0}.row{display:grid;grid-template-columns:1fr 1fr;gap:12px}.msg{margin-top:16px;white-space:pre-wrap;color:#c7c7d2;line-height:1.45}
-.bar{height:10px;background:#272733;border-radius:20px;overflow:hidden;margin-top:14px}.fill{height:100%;width:0;background:#eee;transition:.2s}
-.warn{color:#ffcf70}
+.wrap{max-width:780px;margin:6vh auto;padding:24px}.card{background:#15151c;border:1px solid #2a2a35;border-radius:18px;padding:26px}
+h1{margin:0 0 8px}.sub{color:#aaa;line-height:1.5}
+label{display:block;margin:16px 0 6px;color:#bbb}
+input,button{width:100%;box-sizing:border-box;border-radius:11px;border:1px solid #383845;padding:13px;font-size:16px;background:#0f0f15;color:#fff}
+button{background:#fff;color:#111;font-weight:700;cursor:pointer;margin-top:18px}button:disabled{opacity:.5}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:14px}.check{display:flex;align-items:center;gap:8px}.check input{width:auto}
+#m{margin-top:16px;white-space:pre-wrap;line-height:1.45;color:#ccc}
+.progress{height:10px;background:#292934;border-radius:99px;overflow:hidden;margin-top:16px}.fill{height:100%;width:0;background:#eee;transition:.2s}
+small{color:#888}.tokenrow{display:grid;grid-template-columns:1fr auto;gap:8px}.tokenrow button{margin:0;width:auto;padding:0 16px}
 </style>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-</head>
-<body><div class="wrap"><div class="card">
+</head><body><div class="wrap"><div class="card">
 <h1>Instagram Public Downloader</h1>
-<p class="sub">Stáhne obrázky z veřejného profilu včetně carouselů. U videí ukládá pouze statický náhled jako JPG. Umí i Highlights (uložené Stories).</p>
-<label>Instagram username</label><input id="u" placeholder="např. natgeo">
-<label>Instagram sessionid <span class="warn">(pro Highlights obvykle nutný)</span></label>
-<input id="s" type="password" autocomplete="off" placeholder="volitelné pro feed, doporučené pro Highlights">
-<small>Session se použije jen během požadavku a aplikace ji nikam neukládá ani neloguje.</small>
-<div class="row"><div><label>Feed</label><input id="feed" type="checkbox" checked style="width:auto"></div><div><label>Highlights</label><input id="hl" type="checkbox" checked style="width:auto"></div></div>
+<p class="sub">Veřejné profily: feed, carousely a Highlights. U videí ukládá pouze obrázkový náhled.</p>
+
+<label>Instagram username</label>
+<input id="u" placeholder="např. ha.katerina">
+
+<label>Apify API token</label>
+<div class="tokenrow"><input id="token" type="password" placeholder="apify_api_…"><button id="save">Uložit</button></div>
+<small>Token zůstává v tomto prohlížeči a při spuštění se předá backendu pouze pro konkrétní scrape.</small>
+
+<div class="row">
+<label class="check"><input id="feed" type="checkbox" checked> Feed / carousely</label>
+<label class="check"><input id="hl" type="checkbox" checked> Highlights</label>
+</div>
+
+<label>Maximum postů</label><input id="limit" type="number" min="1" max="5000" value="1000">
+
 <button id="go">Stáhnout všechny fotky jako ZIP</button>
-<div class="bar"><div class="fill" id="fill"></div></div><div id="m" class="msg"></div>
+<div class="progress"><div class="fill" id="fill"></div></div>
+<div id="m"></div>
 </div></div>
 <script>
-const m=document.getElementById('m'),go=document.getElementById('go'),fill=document.getElementById('fill');
-function setp(n,t){fill.style.width=(t?Math.round(n/t*100):0)+'%'}
+const $=id=>document.getElementById(id), m=$('m'), fill=$('fill'), go=$('go');
+$('token').value=localStorage.getItem('apify_token')||'';
+$('save').onclick=()=>{localStorage.setItem('apify_token',$('token').value.trim());m.textContent='Token uložen v tomto prohlížeči.'};
+const safe=s=>String(s||'item').replace(/[^A-Za-z0-9._-]+/g,'_').slice(0,100);
+async function api(body){
+ const r=await fetch('/api/scrape',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+ const j=await r.json().catch(()=>({error:'Neplatná odpověď serveru'}));
+ if(!r.ok) throw new Error(j.error||('HTTP '+r.status));
+ return j;
+}
 go.onclick=async()=>{
- const username=document.getElementById('u').value.trim().replace(/^@/,'');
- if(!username){m.textContent='Zadej username.';return}
- go.disabled=true; setp(0,1); m.textContent='Načítám kompletní seznam médií z Instagramu…';
+ const username=$('u').value.trim().replace(/^@/,'');
+ const token=$('token').value.trim();
+ if(!username) return m.textContent='Zadej username.';
+ if(!token) return m.textContent='Vlož Apify API token.';
+ localStorage.setItem('apify_token',token);
+ go.disabled=true;fill.style.width='0%';
  try{
-  const r=await fetch('/api/list',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({
-   username,sessionid:document.getElementById('s').value.trim(),
-   feed:document.getElementById('feed').checked,highlights:document.getElementById('hl').checked
-  })});
-  const data=await r.json().catch(()=>({error:'Neplatná odpověď serveru'}));
-  if(!r.ok) throw new Error(data.error||('HTTP '+r.status));
-  const items=data.items||[];
-  if(!items.length) throw new Error((data.warnings||[]).join('\n')||'Nebyly nalezeny žádné obrázky.');
-  m.textContent='Nalezeno '+items.length+' obrázků. Stahuji 0/'+items.length+'…'+((data.warnings||[]).length?'\n'+data.warnings.join('\n'):'');
-  const zip=new JSZip();
-  for(let i=0;i<items.length;i++){
-    const it=items[i];
-    const rr=await fetch('/api/media?url='+encodeURIComponent(it.url));
-    if(!rr.ok) throw new Error('Stažení média '+(i+1)+' selhalo (HTTP '+rr.status+').');
-    zip.file(it.path,await rr.blob());
-    setp(i+1,items.length);
-    m.textContent='Nalezeno '+items.length+' obrázků. Stahuji '+(i+1)+'/'+items.length+'…'+((data.warnings||[]).length?'\n'+data.warnings.join('\n'):'');
-  }
-  m.textContent='Vytvářím ZIP…';
-  const blob=await zip.generateAsync({type:'blob',compression:'DEFLATE',compressionOptions:{level:4}});
-  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=username+'_instagram.zip';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),10000);
-  m.textContent='Hotovo — '+items.length+' obrázků.';
+   m.textContent='Spouštím scraper…';
+   const data=await api({username,token,feed:$('feed').checked,highlights:$('hl').checked,limit:Number($('limit').value||1000)});
+   const items=data.items||[];
+   if(!items.length) throw new Error('Scraper nevrátil žádné obrázky.');
+   m.textContent='Nalezeno '+items.length+' obrázků. Stahuji…';
+   const zip=new JSZip();
+   let ok=0,fail=0;
+   for(let i=0;i<items.length;i++){
+      const it=items[i];
+      try{
+        const r=await fetch('/api/proxy?url='+encodeURIComponent(it.url));
+        if(!r.ok) throw new Error('HTTP '+r.status);
+        zip.file(it.path||('image_'+(i+1)+'.jpg'),await r.blob());
+        ok++;
+      }catch(e){fail++}
+      fill.style.width=Math.round((i+1)/items.length*100)+'%';
+      m.textContent='Stahuji '+(i+1)+'/'+items.length+' | OK '+ok+' | chyby '+fail;
+   }
+   if(!ok) throw new Error('Nepodařilo se stáhnout žádný obrázek.');
+   m.textContent='Vytvářím ZIP…';
+   const blob=await zip.generateAsync({type:'blob',compression:'DEFLATE',compressionOptions:{level:4}});
+   const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=safe(username)+'_instagram.zip';document.body.appendChild(a);a.click();a.remove();
+   setTimeout(()=>URL.revokeObjectURL(a.href),10000);
+   m.textContent='Hotovo. V ZIPu '+ok+' obrázků'+(fail?' ('+fail+' se nepodařilo stáhnout).':'') ;
  }catch(e){m.textContent='Chyba: '+e.message}
  finally{go.disabled=false}
 };
