@@ -19,7 +19,7 @@ export default async function handler(req,res){
         username:[u],
         resultsLimit:Math.max(1,Math.min(Number(limit)||1000,5000)),
         skipPinnedPosts:false,
-        dataDetailLevel:'basicData'
+        dataDetailLevel:'detailedData'
       });
     }
     if(highlights){
