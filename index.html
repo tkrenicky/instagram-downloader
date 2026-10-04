@@ -1,116 +1,19 @@
 <!doctype html>
-<html lang="cs">
-<head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Instagram Public Downloader</title>
+<html lang="cs"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Instagram Public Downloader</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-<style>
-body{font-family:Inter,system-ui,sans-serif;background:#0b0b0f;color:#eee;margin:0}
-.wrap{max-width:780px;margin:6vh auto;padding:24px}.card{background:#15151c;border:1px solid #2a2a35;border-radius:18px;padding:26px}
-h1{margin:0 0 8px}.sub{color:#aaa;line-height:1.5}
-label{display:block;margin:16px 0 6px;color:#bbb}
-input,button{width:100%;box-sizing:border-box;border-radius:11px;border:1px solid #383845;padding:13px;font-size:16px;background:#0f0f15;color:#fff}
-button{background:#fff;color:#111;font-weight:700;cursor:pointer;margin-top:18px}button:disabled{opacity:.5}
-.row{display:grid;grid-template-columns:1fr 1fr;gap:14px}.check{display:flex;align-items:center;gap:8px}.check input{width:auto}
-#m{margin-top:16px;white-space:pre-wrap;line-height:1.45;color:#ccc}
-.progress{height:10px;background:#292934;border-radius:99px;overflow:hidden;margin-top:16px}.fill{height:100%;width:0;background:#eee;transition:.2s}
-small{color:#888}.tokenrow{display:grid;grid-template-columns:1fr auto;gap:8px}.tokenrow button{margin:0;width:auto;padding:0 16px}
-</style>
-</head><body><div class="wrap"><div class="card">
-<h1>Instagram Public Downloader</h1>
-<p class="sub">Veřejné profily: feed, carousely a Highlights. U videí ukládá pouze obrázkový náhled.</p>
-
-<label>Instagram username</label>
-<input id="u" placeholder="např. ha.katerina">
-
-<label>Apify API token</label>
-<div class="tokenrow"><input id="token" type="password" placeholder="apify_api_…"><button id="save">Uložit</button></div>
-<small>Token zůstává v tomto prohlížeči a při spuštění se předá backendu pouze pro konkrétní scrape.</small>
-
-<div class="row">
-<label class="check"><input id="feed" type="checkbox" checked> Feed / carousely</label>
-<label class="check"><input id="hl" type="checkbox" checked> Highlights</label>
-</div>
-
-<label>Maximum postů</label><input id="limit" type="number" min="1" max="5000" value="1000">
-
-<button id="go">Stáhnout všechny fotky jako ZIP</button>
-<div class="progress"><div class="fill" id="fill"></div></div>
-<div id="m"></div>
+<style>body{font-family:Inter,system-ui,sans-serif;background:#0b0b0f;color:#eee;margin:0}.wrap{max-width:780px;margin:6vh auto;padding:24px}.card{background:#15151c;border:1px solid #2a2a35;border-radius:18px;padding:26px}h1{margin:0 0 8px}.sub,small{color:#aaa;line-height:1.5}label{display:block;margin:16px 0 6px;color:#bbb}input,button{width:100%;box-sizing:border-box;border-radius:11px;border:1px solid #383845;padding:13px;font-size:16px;background:#0f0f15;color:#fff}button{background:#fff;color:#111;font-weight:700;cursor:pointer;margin-top:18px}button:disabled{opacity:.5}.row{display:grid;grid-template-columns:1fr 1fr;gap:14px}.check{display:flex;align-items:center;gap:8px}.check input{width:auto}#m{margin-top:16px;white-space:pre-wrap;line-height:1.45;color:#ccc}.progress{height:10px;background:#292934;border-radius:99px;overflow:hidden;margin-top:16px}.fill{height:100%;width:0;background:#eee;transition:.2s}.setup{margin-top:18px;padding:14px;border:1px solid #383845;border-radius:12px}.setup a{color:#fff}</style></head>
+<body><div class="wrap"><div class="card"><h1>Instagram Public Downloader</h1><p class="sub">Feed, carousely a Highlights bez Apify. Použije tvoje běžné přihlášení k Instagramu; heslo ani cookies neopouštějí prohlížeč.</p>
+<label>Instagram username</label><input id="u" placeholder="např. luciepucka">
+<div class="row"><label class="check"><input id="feed" type="checkbox"> Feed / carousely</label><label class="check"><input id="hl" type="checkbox" checked> Highlights</label></div>
+<label>Maximum postů ve feedu</label><input id="limit" type="number" min="1" max="5000" value="1000">
+<button id="go">Stáhnout všechny fotky jako ZIP</button><div class="progress"><div class="fill" id="fill"></div></div><div id="m">Kontroluji lokální Instagram bridge…</div>
+<div class="setup" id="setup" hidden><b>Jednorázově je potřeba malé rozšíření prohlížeče.</b><br><small>Je nutné jen proto, že běžná webová stránka nesmí číst tvoje přihlášení na instagram.com.</small><br><br><a href="https://github.com/tkrenicky/instagram-downloader/archive/refs/heads/main.zip">1. Stáhnout rozšíření</a><br><small>2. Rozbal ZIP → otevři chrome://extensions nebo edge://extensions → Režim pro vývojáře → Načíst rozbalené → vyber složku instagram-downloader-main. Pak tuto stránku obnov.</small></div>
 </div></div>
 <script>
-const $=id=>document.getElementById(id),m=$('m'),fill=$('fill'),go=$('go');
-$('token').value=localStorage.getItem('apify_token')||'';
-$('save').onclick=()=>{localStorage.setItem('apify_token',$('token').value.trim());m.textContent='Token uložen v tomto prohlížeči.'};
+const $=id=>document.getElementById(id),m=$('m'),fill=$('fill'),go=$('go'),setup=$('setup');let bridge=false;
 const safe=s=>String(s||'item').replace(/[^A-Za-z0-9._-]+/g,'_').slice(0,100);
-const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-async function post(path,body){
- const r=await fetch(path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
- const j=await r.json().catch(()=>({error:'Neplatná odpověď serveru'}));
- if(!r.ok) throw new Error(j.error||('HTTP '+r.status)); return j;
-}
-function statusLine(states){
- return Object.entries(states).map(([k,v])=>(k==='feed'?'Feed':'Highlights')+': '+v.status+(v.statusMessage?' — '+v.statusMessage:'')+(v.runId?'\nRun ID: '+v.runId:'')).join('\n');
-}
-function failedDetail(k,s){
- const name=k==='feed'?'Feed':'Highlights';
- const msg=s.statusMessage?(' — '+s.statusMessage):'';
- const run=s.runId?(' | Run ID: '+s.runId):'';
- return name+' '+s.status+msg+run;
-}
-async function waitJobs(token,jobs){
- const states={};for(const [k,j] of Object.entries(jobs))states[k]={status:j.status||'READY',runId:j.id,datasetId:j.defaultDatasetId||null,statusMessage:j.statusMessage||''};
- for(let round=0;round<180;round++){
-   let done=true;
-   for(const [k,s] of Object.entries(states)){
-     if(['SUCCEEDED','FAILED','ABORTED','TIMED-OUT'].includes(s.status))continue;
-     done=false;
-     const st=await post('/api/status',{token,runId:s.runId});
-     states[k]={...s,...st,datasetId:st.defaultDatasetId||s.datasetId};
-   }
-   m.textContent=statusLine(states)+'\n\nČekám na dokončení scraperu…';
-   if(done||Object.values(states).every(s=>['SUCCEEDED','FAILED','ABORTED','TIMED-OUT'].includes(s.status)))return states;
-   await sleep(3000);
- }
- throw new Error('Scraper se nedokončil do 9 minut.');
-}
-go.onclick=async()=>{
- const username=$('u').value.trim().replace(/^@/,'');const token=$('token').value.trim();
- if(!username)return m.textContent='Zadej username.';if(!token)return m.textContent='Vlož Apify API token.';
- localStorage.setItem('apify_token',token);go.disabled=true;fill.style.width='0%';
- try{
-   m.textContent='Zakládám scraper joby…';
-   const started=await post('/api/start',{username,token,feed:$('feed').checked,highlights:$('hl').checked,limit:Number($('limit').value||1000)});
-   const jobs=started.jobs||{};if(!Object.keys(jobs).length)throw new Error('Nebyl spuštěn žádný scraper.');
-   m.textContent='Scraper spuštěn. Kontroluji stav…';
-   const states=await waitJobs(token,jobs);
-   const failed=Object.entries(states).filter(([k,s])=>s.status!=='SUCCEEDED');
-   if(failed.length===Object.keys(states).length)throw new Error('Všechny scraper joby selhaly:\n'+failed.map(([k,s])=>failedDetail(k,s)).join('\n'));
-   let items=[];
-   for(const [k,s] of Object.entries(states)){
-     if(s.status!=='SUCCEEDED'||!s.datasetId)continue;
-     m.textContent=statusLine(states)+'\n\nNačítám výsledky '+k+'…';
-     const r=await post('/api/results',{token,datasetId:s.datasetId,kind:k});
-     items.push(...(r.items||[]));
-   }
-   const seen=new Set();items=items.filter(x=>x.url&&!seen.has(x.url)&&seen.add(x.url));
-   if(!items.length)throw new Error('Scraper doběhl, ale nevrátil žádné obrázky.');
-   const zip=new JSZip();let ok=0,err=0;
-   for(let i=0;i<items.length;i++){
-     try{
-       const r=await fetch('/api/proxy?url='+encodeURIComponent(items[i].url));
-       if(!r.ok)throw new Error('HTTP '+r.status);
-       zip.file(items[i].path||('image_'+(i+1)+'.jpg'),await r.blob());ok++;
-     }catch(e){err++}
-     fill.style.width=Math.round((i+1)/items.length*100)+'%';
-     m.textContent='Stahuji obrázky '+(i+1)+'/'+items.length+' | OK '+ok+' | chyby '+err;
-   }
-   if(!ok)throw new Error('Scraper našel média, ale žádný obrázek se nepodařilo stáhnout.');
-   m.textContent='Vytvářím ZIP…';
-   const blob=await zip.generateAsync({type:'blob',compression:'DEFLATE',compressionOptions:{level:4}});
-   const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=safe(username)+'_instagram.zip';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),10000);
-   m.textContent='Hotovo. V ZIPu '+ok+' obrázků'+(err?' | chyby '+err:'')+'.';
- }catch(e){m.textContent='Chyba: '+e.message}
- finally{go.disabled=false}
-};
+window.addEventListener('message',e=>{if(e.source===window&&e.data?.source==='IG_DOWNLOADER_EXTENSION'&&e.data?.type==='READY'){bridge=true;setup.hidden=true;m.textContent='Připraveno. Instagram bridge je aktivní.';}});
+setTimeout(()=>{if(!bridge){setup.hidden=false;m.textContent='Chybí lokální Instagram bridge.';}},1200);
+function collectLocal(payload){return new Promise((resolve,reject)=>{const requestId=crypto.randomUUID();const t=setTimeout(()=>reject(new Error('Rozšíření neodpovědělo. Obnov stránku Instagramu i tuto stránku.')),120000);const fn=e=>{if(e.source!==window||e.data?.source!=='IG_DOWNLOADER_EXTENSION'||e.data?.type!=='RESULT'||e.data.requestId!==requestId)return;clearTimeout(t);window.removeEventListener('message',fn);e.data.ok?resolve(e.data.items||[]):reject(new Error(e.data.error||'Instagram scrape selhal.'));};window.addEventListener('message',fn);window.postMessage({source:'IG_DOWNLOADER_PAGE',type:'COLLECT',requestId,...payload},'*');});}
+go.onclick=async()=>{const username=$('u').value.trim().replace(/^@/,'');if(!username)return m.textContent='Zadej username.';if(!bridge){setup.hidden=false;return m.textContent='Nejdřív nainstaluj rozšíření podle návodu níže.';}go.disabled=true;fill.style.width='0%';try{m.textContent='Načítám data přímo z Instagramu…';let items=await collectLocal({username,feed:$('feed').checked,highlights:$('hl').checked,limit:Number($('limit').value||1000)});const seen=new Set();items=items.filter(x=>x.url&&!seen.has(x.url)&&seen.add(x.url));if(!items.length)throw new Error('Instagram nevrátil žádné obrázky. Zkontroluj, že jsi na instagram.com přihlášen.');m.textContent='Nalezeno '+items.length+' obrázků. Stahuji…';const zip=new JSZip();let ok=0,err=0;for(let i=0;i<items.length;i++){try{const r=await fetch('/api/proxy?url='+encodeURIComponent(items[i].url));if(!r.ok)throw new Error('HTTP '+r.status);zip.file(items[i].path||('image_'+(i+1)+'.jpg'),await r.blob());ok++;}catch(e){err++;}fill.style.width=Math.round((i+1)/items.length*100)+'%';m.textContent='Stahuji '+(i+1)+'/'+items.length+' | OK '+ok+' | chyby '+err;}if(!ok)throw new Error('Nepodařilo se stáhnout žádný obrázek.');m.textContent='Vytvářím ZIP…';const blob=await zip.generateAsync({type:'blob',compression:'DEFLATE',compressionOptions:{level:4}});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=safe(username)+'_instagram.zip';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),10000);m.textContent='Hotovo. V ZIPu '+ok+' obrázků'+(err?' | chyby '+err:'')+'.';}catch(e){m.textContent='Chyba: '+e.message;}finally{go.disabled=false;}};
 </script></body></html>
