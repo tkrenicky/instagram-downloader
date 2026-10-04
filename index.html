@@ -50,10 +50,16 @@ async function post(path,body){
  if(!r.ok) throw new Error(j.error||('HTTP '+r.status)); return j;
 }
 function statusLine(states){
- return Object.entries(states).map(([k,v])=>(k==='feed'?'Feed':'Highlights')+': '+v.status+(v.statusMessage?' — '+v.statusMessage:'')).join('\n');
+ return Object.entries(states).map(([k,v])=>(k==='feed'?'Feed':'Highlights')+': '+v.status+(v.statusMessage?' — '+v.statusMessage:'')+(v.runId?'\nRun ID: '+v.runId:'')).join('\n');
+}
+function failedDetail(k,s){
+ const name=k==='feed'?'Feed':'Highlights';
+ const msg=s.statusMessage?(' — '+s.statusMessage):'';
+ const run=s.runId?(' | Run ID: '+s.runId):'';
+ return name+' '+s.status+msg+run;
 }
 async function waitJobs(token,jobs){
- const states={};for(const [k,j] of Object.entries(jobs))states[k]={status:j.status||'READY',runId:j.id,datasetId:j.defaultDatasetId||null};
+ const states={};for(const [k,j] of Object.entries(jobs))states[k]={status:j.status||'READY',runId:j.id,datasetId:j.defaultDatasetId||null,statusMessage:j.statusMessage||''};
  for(let round=0;round<180;round++){
    let done=true;
    for(const [k,s] of Object.entries(states)){
@@ -79,7 +85,7 @@ go.onclick=async()=>{
    m.textContent='Scraper spuštěn. Kontroluji stav…';
    const states=await waitJobs(token,jobs);
    const failed=Object.entries(states).filter(([k,s])=>s.status!=='SUCCEEDED');
-   if(failed.length===Object.keys(states).length)throw new Error('Všechny scraper joby selhaly: '+failed.map(([k,s])=>k+' '+s.status).join(', '));
+   if(failed.length===Object.keys(states).length)throw new Error('Všechny scraper joby selhaly:\n'+failed.map(([k,s])=>failedDetail(k,s)).join('\n'));
    let items=[];
    for(const [k,s] of Object.entries(states)){
      if(s.status!=='SUCCEEDED'||!s.datasetId)continue;
